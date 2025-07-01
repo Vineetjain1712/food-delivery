@@ -1,6 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
+import { saveOnboardingData, getOnboardingData } from "@/lib/actions/onboarding"
+import { AuthForm } from "@/components/auth-form"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -9,28 +12,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
-import { CheckCircle, ArrowLeft, ArrowRight, User, Building, Target, FileCheck } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { CheckCircle, ArrowLeft, ArrowRight, Building, Target, FileCheck, Loader2, LogOut } from "lucide-react"
+import type { User as SupabaseUser } from "@supabase/supabase-js"
 
 interface FormData {
-  // Personal Information
   firstName: string
   lastName: string
   email: string
   jobTitle: string
-
-  // Company Information
   companyName: string
   companySize: string
   industry: string
   website: string
-
-  // Product Preferences
   useCase: string
   goals: string[]
   budget: string
   timeline: string
-
-  // Additional
   newsletter: boolean
   terms: boolean
 }
@@ -57,7 +55,7 @@ const steps = [
     id: 1,
     title: "Personal Information",
     description: "Tell us about yourself",
-    icon: User,
+    icon: ArrowLeft,
   },
   {
     id: 2,
@@ -112,13 +110,93 @@ const timelines = [
 ]
 
 export default function Component() {
+  const [user, setUser] = useState<SupabaseUser | null>(null)
+  const [loading, setLoading] = useState(true)
   const [currentStep, setCurrentStep] = useState(1)
   const [formData, setFormData] = useState<FormData>(initialFormData)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState("")
+  const [isCompleted, setIsCompleted] = useState(false)
+
+  const supabase = createClient()
+
+  useEffect(() => {
+    // Check initial auth state
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user)
+      if (user) {
+        // Pre-fill email from auth
+        setFormData((prev) => ({ ...prev, email: user.email || "" }))
+        // Load existing onboarding data
+        loadExistingData()
+      }
+      setLoading(false)
+    })
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null)
+      if (session?.user) {
+        setFormData((prev) => ({ ...prev, email: session.user.email || "" }))
+        loadExistingData()
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const loadExistingData = async () => {
+    try {
+      const result = await getOnboardingData()
+      if (result.success && result.data) {
+        const { profile, onboarding } = result.data
+
+        if (profile) {
+          setFormData((prev) => ({
+            ...prev,
+            firstName: profile.first_name || "",
+            lastName: profile.last_name || "",
+            jobTitle: profile.job_title || "",
+          }))
+        }
+
+        if (onboarding) {
+          setFormData((prev) => ({
+            ...prev,
+            companyName: onboarding.companies?.name || "",
+            companySize: onboarding.companies?.size || "",
+            industry: onboarding.companies?.industry || "",
+            website: onboarding.companies?.website || "",
+            useCase: onboarding.use_case || "",
+            goals: onboarding.goals || [],
+            budget: onboarding.budget || "",
+            timeline: onboarding.timeline || "",
+            newsletter: onboarding.newsletter_subscription || false,
+            terms: onboarding.terms_accepted || false,
+          }))
+
+          if (onboarding.completed_at) {
+            setIsCompleted(true)
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error loading existing data:", error)
+    }
+  }
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    setFormData(initialFormData)
+    setCurrentStep(1)
+    setIsCompleted(false)
+  }
 
   const updateFormData = (field: keyof FormData, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
-    // Clear error when user starts typing
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: "" }))
     }
@@ -171,12 +249,65 @@ export default function Component() {
     updateFormData("goals", updatedGoals)
   }
 
-  const handleSubmit = () => {
-    if (validateStep(4)) {
-      console.log("Form submitted:", formData)
-      // Here you would typically send the data to your backend
-      alert("Onboarding completed successfully!")
+  const handleSubmit = async () => {
+    if (!validateStep(4)) return
+
+    setSubmitting(true)
+    setSubmitError("")
+
+    try {
+      const result = await saveOnboardingData(formData)
+
+      if (result.success) {
+        setIsCompleted(true)
+      } else {
+        setSubmitError(result.error || "Failed to save onboarding data")
+      }
+    } catch (error) {
+      setSubmitError("An unexpected error occurred")
+    } finally {
+      setSubmitting(false)
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <AuthForm onAuthSuccess={() => {}} />
+  }
+
+  if (isCompleted) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center py-8 px-4">
+        <Card className="w-full max-w-md text-center">
+          <CardHeader>
+            <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+              <CheckCircle className="w-8 h-8 text-green-600" />
+            </div>
+            <CardTitle className="text-2xl">Welcome Aboard!</CardTitle>
+            <CardDescription>Your onboarding is complete. We're excited to have you on our platform.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-gray-600">
+              You can now start exploring all the features our platform has to offer.
+            </p>
+            <div className="flex gap-2">
+              <Button className="flex-1">Get Started</Button>
+              <Button variant="outline" onClick={handleSignOut}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   const progress = (currentStep / steps.length) * 100
@@ -184,6 +315,17 @@ export default function Component() {
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-2xl mx-auto">
+        {/* Header with Sign Out */}
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <p className="text-sm text-gray-600">Signed in as {user.email}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={handleSignOut}>
+            <LogOut className="w-4 h-4 mr-2" />
+            Sign Out
+          </Button>
+        </div>
+
         {/* Progress Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
@@ -265,6 +407,7 @@ export default function Component() {
                     value={formData.email}
                     onChange={(e) => updateFormData("email", e.target.value)}
                     className={errors.email ? "border-red-500" : ""}
+                    disabled
                   />
                   {errors.email && <p className="text-sm text-red-500">{errors.email}</p>}
                 </div>
@@ -458,6 +601,12 @@ export default function Component() {
                   </div>
                   {errors.terms && <p className="text-sm text-red-500">{errors.terms}</p>}
                 </div>
+
+                {submitError && (
+                  <Alert className="border-red-200 bg-red-50">
+                    <AlertDescription className="text-red-800">{submitError}</AlertDescription>
+                  </Alert>
+                )}
               </div>
             )}
 
@@ -467,7 +616,7 @@ export default function Component() {
                 variant="outline"
                 onClick={prevStep}
                 disabled={currentStep === 1}
-                className="flex items-center gap-2"
+                className="flex items-center gap-2 bg-transparent"
               >
                 <ArrowLeft className="w-4 h-4" />
                 Previous
@@ -479,7 +628,12 @@ export default function Component() {
                   <ArrowRight className="w-4 h-4" />
                 </Button>
               ) : (
-                <Button onClick={handleSubmit} className="bg-green-600 hover:bg-green-700">
+                <Button
+                  onClick={handleSubmit}
+                  disabled={submitting}
+                  className="bg-green-600 hover:bg-green-700 flex items-center gap-2"
+                >
+                  {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   Complete Onboarding
                 </Button>
               )}
