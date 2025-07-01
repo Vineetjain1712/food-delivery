@@ -15,6 +15,7 @@ import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CheckCircle, ArrowLeft, ArrowRight, Building, Target, FileCheck, Loader2, LogOut } from "lucide-react"
 import type { User as SupabaseUser } from "@supabase/supabase-js"
+import { ConnectionTest } from "@/components/connection-test"
 
 interface FormData {
   firstName: string
@@ -325,6 +326,9 @@ export default function Component() {
             Sign Out
           </Button>
         </div>
+
+        {/* Connection Test */}
+        <ConnectionTest />
 
         {/* Progress Header */}
         <div className="mb-8">
