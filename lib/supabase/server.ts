@@ -1,12 +1,10 @@
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
-import { getServerConfig } from "@/lib/config"
 
 export async function createClient() {
   const cookieStore = await cookies()
-  const config = getServerConfig()
 
-  return createServerClient(config.supabase.url, config.supabase.anonKey, {
+  return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
       getAll() {
         return cookieStore.getAll()
@@ -19,22 +17,6 @@ export async function createClient() {
           // This can be ignored if you have middleware refreshing
           // user sessions.
         }
-      },
-    },
-  })
-}
-
-// Admin client for server-side operations that need elevated permissions
-export async function createAdminClient() {
-  const config = getServerConfig()
-
-  return createServerClient(config.supabase.url, config.supabase.serviceRoleKey, {
-    cookies: {
-      getAll() {
-        return []
-      },
-      setAll() {
-        // No-op for admin client
       },
     },
   })

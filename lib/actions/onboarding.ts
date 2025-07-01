@@ -34,8 +34,7 @@ export async function saveOnboardingData(data: OnboardingData) {
       return { success: false, error: "User not authenticated" }
     }
 
-    // Start a transaction-like operation
-    // First, create or update the profile
+    // Create or update the profile
     const { error: profileError } = await supabase.from("profiles").upsert({
       id: user.id,
       first_name: data.firstName,
